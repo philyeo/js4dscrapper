@@ -1,13 +1,49 @@
-/**
- * Web scraper for toto 4d
- */
-
 const puppeteer = require('puppeteer');
 const random_useragent = require('random-useragent');
-const { result_url } = require('./config');
+const { monthView_url } = require('./config');
 const fs = require('fs');
 
-async function scrapeProduct() {
+
+async function getAllDrawNums(drawMth) {
+  process.setMaxListeners(0);
+
+  try {
+  // Open Browser  
+  // const browser = await puppeteer.launch({ headless: false }); 
+  const browser = await puppeteer.launch({executablePath: '/usr/bin/chromium-browser'});
+  const root_url = "https://www.sportstoto.com.my/";
+  // const browser = await puppeteer.launch();  
+  const page = await browser.newPage();
+  // await page.screenshot({path: 'example.png'});
+  // Setup brower
+  await page.setDefaultTimeout(10000);
+  await page.setViewport({ width: 1200, height: 800 });
+  await page.setUserAgent(random_useragent.getRandom());
+
+  // Get data from website
+  await page.goto(drawMth);
+
+  const drawNums = await page.evaluate(() => 
+                                    Array.from(document.querySelectorAll('span.calendar_drawnumber')).map(e => e.innerText)
+                            );
+
+  await browser.close();
+  drawNums.forEach(num => scrapeProduct(num))
+
+  // console.log(drawNums);
+  // const outData = JSON.stringify(data);
+  // fs.writeFile('out.json', outData, function(err, result) {
+  //   if (err) console.log('error', err);
+  // });
+
+
+  }catch(error) {
+    console.log(error);
+    process.exit(1);
+  }
+}
+
+async function scrapeProduct(drawNum) {
   // console.log("hello");
   try {
   // Open Browser  
@@ -25,7 +61,8 @@ async function scrapeProduct() {
   const data = {};
 
   // Get data from website
-  await page.goto(result_url);
+  const finalUrl = 'https://www.sportstoto.com.my/popup_past_results.asp?drawNo=' + drawNum;
+  await page.goto(finalUrl);
   // await page.waitForSelector(drawDetails_selector);
   const drawDetails = await page.evaluate(() => 
                                           Array.from(document.querySelectorAll('div#popup_container * span.txt_black6')).map(e => e.innerText)
@@ -162,11 +199,11 @@ async function scrapeProduct() {
                                           );                                             
 
 
-  console.log(data);
-  // const outData = JSON.stringify(data);
-  // fs.writeFile('out.json', outData, function(err, result) {
-  //   if (err) console.log('error', err);
-  // });
+  // console.log(data);
+  const outData = JSON.stringify(data);
+  fs.appendFile('out.json', outData, function(err, result) {
+    if (err) console.log('error', err);
+  });
 
   await browser.close();
 
@@ -176,7 +213,9 @@ async function scrapeProduct() {
   }
 }
 
-async function getAllDrawNumbers() {
+getAllDrawNums(monthView_url);
+
+// async function getAllDrawNumbers() {
   //get all drawNo values in each results_past.asp page
 
   //returns all the drawNumbers within that month
@@ -186,7 +225,7 @@ async function getAllDrawNumbers() {
   //document.querySelector('#CalendarFrame > tbody > tr > td.calendar_right > a').getAttribute('href').split('=')[1]
 
 
-}
+// }
 
 
 //startScrape(beginDate) //date format is m/d/yyyy //assumes end date is current date
@@ -215,4 +254,3 @@ async function getAllDrawNumbers() {
 //   counter = 1;
 // }
 
-scrapeProduct();
