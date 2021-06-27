@@ -19,6 +19,7 @@ async function getAllDrawNums(drawMth) {
   await page.setDefaultTimeout(10000);
   await page.setViewport({ width: 1200, height: 800 });
   await page.setUserAgent(random_useragent.getRandom());
+  await page.setDefaultNavigationTimeout(0); 
 
   // Get data from website
   await page.goto(drawMth);
@@ -28,13 +29,26 @@ async function getAllDrawNums(drawMth) {
                             );
 
   await browser.close();
-  drawNums.forEach(num => scrapeProduct(num))
+  const mainData = [];
 
-  // console.log(drawNums);
-  // const outData = JSON.stringify(data);
-  // fs.writeFile('out.json', outData, function(err, result) {
-  //   if (err) console.log('error', err);
-  // });
+
+  //should use drawNums.map instead as map retains the end result of each element which I can than use to
+  //merge the dictionaries of results into a single master dict and print that out to file
+  //refer to https://advancedweb.hu/how-to-use-async-functions-with-array-foreach-in-javascript/
+  //to how to use .map asyncchronously
+  const asyncDrawNums = await Promise.all(drawNums.map(async (i) => {
+                                  // await sleep(10);
+                                  console.log("scraping drawNum ", i);
+                                  return scrapeProduct(i);
+                                  // console.log("scrapped ");
+                                }
+                          ));
+
+  // console.log(asyncDrawNums);
+  const outData = JSON.stringify(asyncDrawNums);
+  fs.writeFile('out.json', outData, function(err, result) {
+    if (err) console.log('error', err);
+  });
 
 
   }catch(error) {
@@ -197,15 +211,16 @@ async function scrapeProduct(drawNum) {
   data[gameType8]["fifthPrize"] = (await page.evaluate(() => 
                                             Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(5) > td.txt_black4')).map(e => e.innerText))
                                           );                                             
-
-
-  // console.log(data);
-  const outData = JSON.stringify(data);
-  fs.appendFile('out.json', outData, function(err, result) {
-    if (err) console.log('error', err);
-  });
-
   await browser.close();
+  
+  return data;
+  // console.log(data);
+  // const outData = JSON.stringify(data);
+  // fs.appendFile('out.json', outData, function(err, result) {
+  //   if (err) console.log('error', err);
+  // });
+
+
 
   }catch(error) {
     console.log(error);
