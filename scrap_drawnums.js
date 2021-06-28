@@ -68,8 +68,11 @@ async function getAllDrawNums(drawMth, strMth) {
   await page.goto(drawMth, {waitUntil: 'load', timeout: 0});
 
   const drawNums = await page.evaluate(() => 
-                                    Array.from(document.querySelectorAll('span.calendar_drawnumber')).map(e => e.innerText)
+                                Array.from(document.querySelectorAll('a[onclick*="window.open"] > div > span')).map(e => e.innerText)
                             );
+                    //         const drawNums = await page.evaluate(() => 
+                    //         Array.from(document.querySelectorAll('span.calendar_drawnumber')).map(e => e.innerText)
+                    // );                            
 
   await browser.close();
 
@@ -124,6 +127,7 @@ async function scrapeProduct(drawNum) {
   // await page.tracing.start({ path: 'trace.json' });
   const finalUrl = result_url + drawNum;
   await page.goto(finalUrl, {waitUntil: 'load', timeout: 0});
+  // await page.goto(finalUrl, {waitUntil: 'load'});
   
   const data = await page.evaluate(() => {
     let root_url = "https://www.sportstoto.com.my/";

@@ -5,5 +5,5 @@ module.exports = {
   monthView_url: 'https://www.sportstoto.com.my/results_past.asp?date=',
   // monthView_url: 'https://www.sportstoto.com.my/results_past.asp'
   startMonth: '2021-01-01',
-  endMonth: '2021-05-01'
+  endMonth: '2021-06-01'
 }
