@@ -1,16 +1,59 @@
 const puppeteer = require('puppeteer');
+const moment = require('moment');
+const util = require('util');
 const random_useragent = require('random-useragent');
-const { monthView_url } = require('./config');
+const { monthView_url, startMonth, endMonth, result_url } = require('./config');
 const fs = require('fs');
 
 
-async function getAllDrawNums(drawMth) {
-  process.setMaxListeners(0);
+async function getAllMonths(startMth, endMth) {
+  try {
+    const startDate = moment(startMth);
+    const endDate = moment(endMth);
+    const allMonthsUrls = [];
 
+    if (endDate.isBefore(startDate)) {
+        throw "End date must be greated than start date."
+    }      
+    
+    //https://www.sportstoto.com.my/results_past.asp?date=6/01/2021
+    while (startDate.isSameOrBefore(endDate)) {
+        let print_url = monthView_url.concat(startDate.format("M/DD/YYYY").toString().concat(', ', startDate.format("M-DD-YYYY")));
+        allMonthsUrls.push(print_url);
+        startDate.add(1, 'month');
+    }
+    const asyncConsolidatedResults = await Promise.all(allMonthsUrls.map(async (i) => {
+            // await sleep(10);
+            let url = i.split(',')[0];
+            let mth = i.split(',')[1];
+            console.log("scraping drawNum ", url);
+            return getAllDrawNums(url, mth);
+            // console.log("scrapped ");
+        }
+      ));
+
+  // const outData = JSON.stringify(asyncConsolidatedResults);
+  // fs.writeFile('out.json', outData, function(err, result) {
+  //   if (err) console.log('error', err);
+  // });
+    // console.log(result);
+  
+  }catch(error) {
+    console.log(error);
+    process.exit(1);
+  }    
+}
+
+async function getAllDrawNums(drawMth, strMth) {
+  console.log(strMth);
+  process.setMaxListeners(0);
   try {
   // Open Browser  
   // const browser = await puppeteer.launch({ headless: false }); 
-  const browser = await puppeteer.launch({executablePath: '/usr/bin/chromium-browser'});
+  const browser = await puppeteer.launch({
+    // headless: false,
+    executablePath: '/usr/bin/chromium-browser'
+  });
   const root_url = "https://www.sportstoto.com.my/";
   // const browser = await puppeteer.launch();  
   const page = await browser.newPage();
@@ -19,18 +62,16 @@ async function getAllDrawNums(drawMth) {
   await page.setDefaultTimeout(10000);
   await page.setViewport({ width: 1200, height: 800 });
   await page.setUserAgent(random_useragent.getRandom());
-  await page.setDefaultNavigationTimeout(0); 
+  // await page.setDefaultNavigationTimeout(0); 
 
   // Get data from website
-  await page.goto(drawMth);
+  await page.goto(drawMth, {waitUntil: 'load', timeout: 0});
 
   const drawNums = await page.evaluate(() => 
                                     Array.from(document.querySelectorAll('span.calendar_drawnumber')).map(e => e.innerText)
                             );
 
   await browser.close();
-  const mainData = [];
-
 
   //should use drawNums.map instead as map retains the end result of each element which I can than use to
   //merge the dictionaries of results into a single master dict and print that out to file
@@ -45,24 +86,30 @@ async function getAllDrawNums(drawMth) {
                           ));
 
   // console.log(asyncDrawNums);
+  const outFileName = strMth + '.out.json';
   const outData = JSON.stringify(asyncDrawNums);
-  fs.writeFile('out.json', outData, function(err, result) {
+  fs.writeFile(outFileName, outData, function(err, result) {
     if (err) console.log('error', err);
   });
 
+  // await util.promisify(fs.writeFile)(outFileName, JSON.stringify(asyncDrawNums, null, ' '));
+
+  return asyncDrawNums;
+
 
   }catch(error) {
-    console.log(error);
+    console.log(error + " -->" + strMth);
     process.exit(1);
   }
 }
 
 async function scrapeProduct(drawNum) {
-  // console.log("hello");
   try {
   // Open Browser  
-  // const browser = await puppeteer.launch({ headless: false }); 
-  const browser = await puppeteer.launch({executablePath: '/usr/bin/chromium-browser'});
+  const browser = await puppeteer.launch({
+    // headless: false,
+    executablePath: '/usr/bin/chromium-browser'
+  });
   const root_url = "https://www.sportstoto.com.my/";
   // const browser = await puppeteer.launch();  
   const page = await browser.newPage();
@@ -71,146 +118,116 @@ async function scrapeProduct(drawNum) {
   await page.setDefaultTimeout(10000);
   await page.setViewport({ width: 1200, height: 800 });
   await page.setUserAgent(random_useragent.getRandom());
-
-  const data = {};
+  // await page.setDefaultNavigationTimeout(0); 
 
   // Get data from website
-  const finalUrl = 'https://www.sportstoto.com.my/popup_past_results.asp?drawNo=' + drawNum;
-  await page.goto(finalUrl);
-  // await page.waitForSelector(drawDetails_selector);
-  const drawDetails = await page.evaluate(() => 
-                                          Array.from(document.querySelectorAll('div#popup_container * span.txt_black6')).map(e => e.innerText)
-                            );
+  // await page.tracing.start({ path: 'trace.json' });
+  const finalUrl = result_url + drawNum;
+  await page.goto(finalUrl, {waitUntil: 'load', timeout: 0});
   
-  data["drawDate"] = drawDetails[0].split(',')[0];
-  data["drawNo"] = drawDetails[1];
+  const data = await page.evaluate(() => {
+    let root_url = "https://www.sportstoto.com.my/";
+    const results = {};
+    const drawDetails = Array.from(document.querySelectorAll('div#popup_container * span.txt_black6')).map(e => e.innerText);
 
-  // await page.waitForSelector(drawGameTypes_selector);
-  const gameTypes = await page.evaluate(() => 
-                                  Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 * td.txt_white5')).map(e => e.innerText.replace(/\s/g, ""))
-                            );
+    results["drawDate"] = drawDetails[0].split(',')[0];
+    results["drawNo"] = drawDetails[1];
 
-  const gameType1 = gameTypes[0];  //toto4d
-  data[gameType1] = {}; //toto4d
-                                    
-  // await page.waitForSelector(drawResultsTbl_selector);
-  const toto4Dtop3Results = await page.evaluate(() => 
-                                    Array.from(document.querySelectorAll('div#popup_container * tr.txt_black2')[0].querySelectorAll('td')).map(e => e.innerText)
-                            );
+    const gameTypes = Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 * td.txt_white5')).map(e => e.innerText.replace(/\s/g, ""));
+
+    const gameType1 = gameTypes[0];  //toto4d
+    results[gameType1] = {}; //toto4d
+
+
+    const toto4Dtop3Results = Array.from(document.querySelectorAll('div#popup_container * tr.txt_black2')[0].querySelectorAll('td')).map(e => e.innerText);
+
+    results[gameType1]["firstPrize"] = toto4Dtop3Results[0];
+    results[gameType1]["secondPrize"] = toto4Dtop3Results[1];
+    results[gameType1]["thirdPrize"] = toto4Dtop3Results[2];
+
+    results[gameType1]["SpecialPrize"] = Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 > table > tbody > tr > td > table > tbody')[1].querySelectorAll('td')).map(e => e.innerText).filter(k => k % 1 === 0).filter(k => k.length > 1);
+
+    results[gameType1]["ConsolationPrize"] = Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 > table > tbody > tr > td > table > tbody')[1].querySelectorAll('td')).map(e => e.innerText).filter(k => k % 1 === 0).filter(k => k.length > 1);
+     
+    const gameType2 = gameTypes[1];  //toto4djackpot
+    results[gameType2] = {}; //toto4djackpot
+
+    const toto4djackpot_raw  = Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 > table > tbody > tr > td > table > tbody')[3].querySelectorAll('td')).map(e => e.innerText);
+
+    toto4djackpot_raw.pop();
+    results[gameType2][toto4djackpot_raw.shift().replace(/\s/g, "")] = toto4djackpot_raw.shift().replace(/\s/g, "");
+    const jackpot2amt = toto4djackpot_raw.pop().replace(/\s/g, "");
+    results[gameType2][toto4djackpot_raw.pop().replace(/\s/g, "")] = jackpot2amt;
+    results[gameType2]["Numbers"] = toto4djackpot_raw;
+
+    const otherGameTypeLabels = Array.from(document.querySelectorAll('div#popup_container * div.row > div.col-sm-6 * td.txt_white6')).map(e => e.innerText);
+   
+    const gameType3 = gameTypes[2];  //toto4dzodiac
+    results[gameType3] = {}; //toto4dzodiac
+ 
+    results[gameType3]["Zodiac"] = root_url.concat(document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(1) > td.txt_black2.txt_left > span > img').getAttribute('src'));
+
+    results[gameType3]["firstPrize"] = document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(1) > td:nth-child(2)').innerText;
+
+    results[gameType3]["secondPrize"] = document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(2) > td.txt_black2').innerText;
+
+    results[gameType3]["thirdPrize"] = document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(3) > td.txt_black2').innerText;
+
+    results[gameType3]["fourthPrize"] = document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(4) > td.txt_black2').innerText;
+
+    results[gameType3]["fifthPrize"] = document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(5) > td.txt_black2').innerText;
+
+    results[gameType3]["sixthPrize"] = document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(6) > td.txt_black2').innerText;
+
+    const gameType4 = otherGameTypeLabels[0].replace('\n', '_').replace(/\s/g, "_"); // supremetoto
+    results[gameType4] = {}; //supremetoto
+
+    results[gameType4]["Jackpot"] = document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(2) > tbody > tr:nth-child(2) > td.txt_red1').innerText;
+
+    results[gameType4]["Numbers"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(2) > tbody > tr:nth-child(1) > td.txt_black2')).map(e => e.innerText).toString().split('\n').map(i => i.trim())[0];
+
+    const gameType5 = otherGameTypeLabels[1].replace('\n', '_').replace(/\s/g, "_"); //powertoto
+    results[gameType5] = {}; //powertoto     
+
+    results[gameType5]["Jackpot"] = document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(3) > tbody > tr:nth-child(2) > td.txt_red1').innerText;
   
-  data[gameType1]["firstPrize"] = toto4Dtop3Results[0];
-  data[gameType1]["secondPrize"] = toto4Dtop3Results[1];
-  data[gameType1]["thirdPrize"] = toto4Dtop3Results[2];
-    
-  data[gameType1]["SpecialPrize"] = await page.evaluate(() => 
-                                              Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 > table > tbody > tr > td > table > tbody')[1].querySelectorAll('td')).map(e => e.innerText).filter(k => k % 1 === 0).filter(k => k.length > 1)
-                                      );
+    results[gameType5]["Numbers"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(3) > tbody > tr:nth-child(1) > td.txt_black2')).map(e => e.innerText).toString().split('\n').map(i => i.trim())[0];
+
+    const gameType6 = otherGameTypeLabels[2].replace('\n', '_').replace(/\s/g, "_"); //startoto
+    results[gameType6] = {}; //startoto
+
+    results[gameType6]["Jackpot1"] = document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(4) > tbody > tr:nth-child(2) > td.txt_red1').innerText;
+
+    results[gameType6]["Jackpot2"] = document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(4) > tbody > tr:nth-child(3) > td.txt_red1').innerText;
+
+    results[gameType6]["Numbers"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(4) > tbody > tr:nth-child(1) > td.txt_black2')).map(e => e.innerText).toString().split('\n').map(i => i.trim())[0];
+
+    const gameType7 = gameTypes[3];  //toto5d
+    results[gameType7] = {}; //toto5d
   
-  data[gameType1]["ConsolationPrize"] = await page.evaluate(() => 
-                                              Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 > table > tbody > tr > td > table > tbody')[1].querySelectorAll('td')).map(e => e.innerText).filter(k => k % 1 === 0).filter(k => k.length > 1)
-                                      );
-
-  const gameType2 = gameTypes[1];  //toto4djackpot
-  data[gameType2] = {}; //toto4djackpot
-
-  const toto4djackpot_raw  = await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('div#popup_container * div.col-sm-6 > table > tbody > tr > td > table > tbody')[3].querySelectorAll('td')).map(e => e.innerText)
-                                        );
-  toto4djackpot_raw.pop();
-  data[gameType2][toto4djackpot_raw.shift().replace(/\s/g, "")] = toto4djackpot_raw.shift().replace(/\s/g, "");
-  const jackpot2amt = toto4djackpot_raw.pop().replace(/\s/g, "");
-  data[gameType2][toto4djackpot_raw.pop().replace(/\s/g, "")] = jackpot2amt;
-  data[gameType2]["Numbers"] = toto4djackpot_raw;
-
-  const otherGameTypeLabels = await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('div#popup_container * div.row > div.col-sm-6 * td.txt_white6')).map(e => e.innerText)
-                                          );
-
-  const gameType3 = gameTypes[2];  //toto4dzodiac
-  data[gameType3] = {}; //toto4dzodiac
-  data[gameType3]["Zodiac"] = root_url.concat(await page.evaluate(() => 
-                                              document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(1) > td.txt_black2.txt_left > span > img').getAttribute('src'))
-                                        );
-  data[gameType3]["firstPrize"] = await page.evaluate(() => 
-                                              document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(1) > td:nth-child(2)').innerText
-                                          );
-  data[gameType3]["secondPrize"] = await page.evaluate(() => 
-                                              document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(2) > td.txt_black2').innerText
-                                          );
-  data[gameType3]["thirdPrize"] = await page.evaluate(() => 
-                                              document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(3) > td.txt_black2').innerText
-                                          );
-  data[gameType3]["fourthPrize"] = await page.evaluate(() => 
-                                              document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(4) > td.txt_black2').innerText
-                                          );
-  data[gameType3]["fifthPrize"] = await page.evaluate(() => 
-                                              document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(5) > td.txt_black2').innerText
-                                          );
-  data[gameType3]["sixthPrize"] = await page.evaluate(() => 
-                                              document.querySelector('#popup_container > div > div > div:nth-child(1) > table:nth-child(4) > tbody > tr:nth-child(6) > td.txt_black2').innerText
-                                          );
-
-  const gameType4 = otherGameTypeLabels[0].replace('\n', '_').replace(/\s/g, "_"); // supremetoto
-  data[gameType4] = {}; //supremetoto
-  data[gameType4]["Jackpot"] = await page.evaluate(() => 
-                                            document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(2) > tbody > tr:nth-child(2) > td.txt_red1').innerText
-                                          );
-  data[gameType4]["Numbers"] = await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(2) > tbody > tr:nth-child(1) > td.txt_black2')).map(e => e.innerText).toString().split('\n').map(i => i.trim())[0]
-                                          );
-
-  const gameType5 = otherGameTypeLabels[1].replace('\n', '_').replace(/\s/g, "_"); //powertoto
-  data[gameType5] = {}; //powertoto
-  data[gameType5]["Jackpot"] = await page.evaluate(() => 
-                                            document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(3) > tbody > tr:nth-child(2) > td.txt_red1').innerText
-                                          );
-  data[gameType5]["Numbers"] = await page.evaluate(() => 
-                                              Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(3) > tbody > tr:nth-child(1) > td.txt_black2')).map(e => e.innerText).toString().split('\n').map(i => i.trim())[0]
-                                          );
-
-  const gameType6 = otherGameTypeLabels[2].replace('\n', '_').replace(/\s/g, "_"); //startoto
-  data[gameType6] = {}; //startoto
-  data[gameType6]["Jackpot1"] = await page.evaluate(() => 
-                                            document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(4) > tbody > tr:nth-child(2) > td.txt_red1').innerText
-                                        );
-  data[gameType6]["Jackpot2"] = await page.evaluate(() => 
-                                            document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(4) > tbody > tr:nth-child(3) > td.txt_red1').innerText
-                                        );
-  data[gameType6]["Numbers"] = await page.evaluate(() => 
-                                          Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(4) > tbody > tr:nth-child(1) > td.txt_black2')).map(e => e.innerText).toString().split('\n').map(i => i.trim())[0]
-                                  );                                   
-                                     
-  const gameType7 = gameTypes[3];  //toto5d
-  data[gameType7] = {}; //toto5d
-
-  data[gameType7]["firstPrize"] = (await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(6) > tbody > tr:nth-child(1) > td.txt_black4')).map(n => n.innerText))
-                                          );  
-  data[gameType7]["secondPrize"] = (await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(6) > tbody > tr:nth-child(2) > td.txt_black4')).map(n => n.innerText))
-                                          );
-  data[gameType7]["thirdPrize"] = (await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(6) > tbody > tr:nth-child(3) > td.txt_black4')).map(n => n.innerText))
-                                          );               
+    results[gameType7]["firstPrize"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(6) > tbody > tr:nth-child(1) > td.txt_black4')).map(n => n.innerText);
                                           
-  const gameType8 = gameTypes[4];  //toto6d
-  data[gameType8] = {}; //toto6d
+    results[gameType7]["secondPrize"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(6) > tbody > tr:nth-child(2) > td.txt_black4')).map(n => n.innerText);
 
-  data[gameType8]["firstPrize"] = await page.evaluate(() => 
-                                            document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(1) > td.txt_black4').innerText
-                                        );
-  data[gameType8]["secondPrize"] = (await page.evaluate(() => 
-                                              Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(2) > td.txt_black4')).map(e => e.innerText))
-                                          );               
-  data[gameType8]["thirdPrize"] = (await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(3) > td.txt_black4')).map(e => e.innerText))
-                                          );                                           
-  data[gameType8]["fourthPrize"] = (await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(4) > td.txt_black4')).map(e => e.innerText))
-                                          );
-  data[gameType8]["fifthPrize"] = (await page.evaluate(() => 
-                                            Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(5) > td.txt_black4')).map(e => e.innerText))
-                                          );                                             
+    results[gameType7]["thirdPrize"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(6) > tbody > tr:nth-child(3) > td.txt_black4')).map(n => n.innerText);
+                 
+    const gameType8 = gameTypes[4];  //toto6d
+    results[gameType8] = {}; //toto6d
+  
+    results[gameType8]["firstPrize"] = document.querySelector('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(1) > td.txt_black4').innerText;
+                                          
+    results[gameType8]["secondPrize"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(2) > td.txt_black4')).map(e => e.innerText);
+
+    results[gameType8]["thirdPrize"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(3) > td.txt_black4')).map(e => e.innerText);
+
+    results[gameType8]["fourthPrize"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(4) > td.txt_black4')).map(e => e.innerText);
+
+    results[gameType8]["fifthPrize"] = Array.from(document.querySelectorAll('#popup_container > div > div > div:nth-child(2) > table:nth-child(7) > tbody > tr:nth-child(5) > td.txt_black4')).map(e => e.innerText);
+    
+    return results;
+
+});
+  // await page.tracing.stop();
   await browser.close();
   
   return data;
@@ -223,49 +240,10 @@ async function scrapeProduct(drawNum) {
 
 
   }catch(error) {
-    console.log(error);
+    console.log(error + " -->" + drawNum);
     process.exit(1);
   }
 }
 
-getAllDrawNums(monthView_url);
-
-// async function getAllDrawNumbers() {
-  //get all drawNo values in each results_past.asp page
-
-  //returns all the drawNumbers within that month
-  //Array.from(document.querySelectorAll('span.calendar_drawnumber')).map(e => e.innerText)
-
-  //get the next months date
-  //document.querySelector('#CalendarFrame > tbody > tr > td.calendar_right > a').getAttribute('href').split('=')[1]
-
-
-// }
-
-
-//startScrape(beginDate) //date format is m/d/yyyy //assumes end date is current date
-//specify the begin and end date for scraping
-//from start date as long as not endDate
-// go to each month, 
-//      for each month, call getAllDrawNumbers() function
-//            for each drawNumbers in array of drawNumbers returned, call scapeProduct(drawNo)
-
-
-// var startDate = "1/20"
-
-// var d = new Date();
-// var m = d.getMonth() + 1;
-// var y = d.getFullYear().toString().substr(-2);
-// d=startDate.split("/")
-// counter = parseInt(d[0])
-// for(var i=parseInt(d[1]);i<=parseInt(y);i++)
-// {
-//   for(var j=counter;j<=12;j++){
-//     if(j>m && i==y){
-//        continue
-//     }
-//     console.log(j+"/"+i)
-//   }
-//   counter = 1;
-// }
-
+// getAllDrawNums(monthView_url);
+getAllMonths(startMonth, endMonth)
